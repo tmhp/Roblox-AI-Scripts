@@ -24,70 +24,73 @@ local isDragging, dragStart, startPos, isOpen, isWallhackEnabled = false, nil, n
 local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 -- Add this line to define the highlights table:
-local highlights = {} 
+local highlights = {} 
 
 -- Dragging Functionality (Compact)
 local function update(input)
-  MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + input.Position.X - dragStart.X, startPos.Y.Scale, startPos.Y.Offset + input.Position.Y - dragStart.Y)
+  MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + input.Position.X - dragStart.X, startPos.Y.Scale, startPos.Y.Offset + input.Position.Y - dragStart.Y)
 end
 
 MainFrame.InputBegan:Connect(function(input)
-  if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-    isDragging, dragStart, startPos = true, input.Position, MainFrame.Position
-    input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then isDragging = false end end)
-  end
+  if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+    isDragging, dragStart, startPos = true, input.Position, MainFrame.Position
+    input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then isDragging = false end end)
+  end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
-  if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-    if isDragging then update(input) end
-  end
+  if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+    if isDragging then update(input) end
+  end
 end)
 
 -- Open/Close Functionality (Compact)
 OpenCloseButton.MouseButton1Click:Connect(function()
-  isOpen = not isOpen
-  OpenCloseButton.Text = isOpen and "+" or "-"
-  TweenService:Create(MainFrame, tweenInfo, {Size = UDim2.new(0, 200, 0, isOpen and 300 or 25)}):Play()
+  isOpen = not isOpen
+  OpenCloseButton.Text = isOpen and "+" or "-"
+  -- Toggle Wallhack button visibility
+  WallhackToggle.Visible = isOpen 
+
+  TweenService:Create(MainFrame, tweenInfo, {Size = UDim2.new(0, 200, 0, isOpen and 300 or 25)}):Play()
 end)
 
 -- Highlight Functionality (Optimized with Wallhack Toggle)
 local function highlightPlayer(player)
-  if player ~= LocalPlayer then
-    local character = player.Character
-    if character then
-      -- Reuse existing Highlight if available
-      local highlight = highlights[player] or Instance.new("Highlight")
-      highlight.Name = "Highlight"
-      highlight.Adornee = character
-      highlight.FillColor = Color3.fromRGB(255, 0, 0)
-      highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-      highlight.OutlineTransparency = 0.1
-      highlight.FillTransparency = 0.8
-      highlight.DepthMode = isWallhackEnabled and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-      highlight.Parent = workspace
-      highlights[player] = highlight -- Store the Highlight
-    end
-  end
+  if player ~= LocalPlayer then
+    local character = player.Character
+    if character then
+      -- Reuse existing Highlight if available
+      local highlight = highlights[player] or Instance.new("Highlight")
+      highlight.Name = "Highlight"
+      highlight.Adornee = character
+      highlight.FillColor = Color3.fromRGB(255, 0, 0)
+      highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+      highlight.OutlineTransparency = 0.1
+      highlight.FillTransparency = 0.8
+      highlight.DepthMode = isWallhackEnabled and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+      highlight.Parent = workspace
+      highlights[player] = highlight -- Store the Highlight
+    end
+  end
 end
 
 -- Call highlightPlayer on existing players
 for _, player in pairs(Players:GetPlayers()) do
-  highlightPlayer(player)
+  highlightPlayer(player)
 end
 
 -- Call highlightPlayer when a new player joins
 Players.PlayerAdded:Connect(function(player)
-  highlightPlayer(player)
+  highlightPlayer(player)
 end)
 
 -- Toggle Wallhack
 WallhackToggle.MouseButton1Click:Connect(function()
-  isWallhackEnabled = not isWallhackEnabled
-  WallhackToggle.Text = "Wallhack: " .. (isWallhackEnabled and "On" or "Off")
+  isWallhackEnabled = not isWallhackEnabled
+  WallhackToggle.Text = "Wallhack: " .. (isWallhackEnabled and "On" or "Off")
 
-  -- Re-apply highlights to update DepthMode
-  for _, player in pairs(Players:GetPlayers()) do
-    highlightPlayer(player)
-  end
+  -- Re-apply highlights to update DepthMode
+  for _, player in pairs(Players:GetPlayers()) do
+    highlightPlayer(player)
+  end
 end)
