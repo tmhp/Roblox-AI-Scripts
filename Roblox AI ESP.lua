@@ -48,8 +48,13 @@ end)
 OpenCloseButton.MouseButton1Click:Connect(function()
   isOpen = not isOpen
   OpenCloseButton.Text = isOpen and "+" or "-"
-  -- Toggle Wallhack button visibility
-  WallhackToggle.Visible = isOpen 
+
+  -- **Correctly toggle visibility of children**
+  for _, child in pairs(MainFrame:GetChildren()) do
+    if child ~= OpenCloseButton then -- Keep the Open/Close button visible
+      child.Visible = isOpen
+    end
+  end
 
   TweenService:Create(MainFrame, tweenInfo, {Size = UDim2.new(0, 200, 0, isOpen and 300 or 25)}):Play()
 end)
