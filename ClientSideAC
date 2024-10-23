@@ -1,8 +1,6 @@
--- Client-side script (LocalScript in StarterCharacterScripts)
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")  
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local LocalPlayer = Players.LocalPlayer
@@ -41,9 +39,7 @@ end
 -- Wait for the character to load
 local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-
 local humanoid = character:WaitForChild("Humanoid")
-
 
 -- Receive corrected position from the server
 local movementCorrected = ReplicatedStorage:WaitForChild("MovementCorrected")
@@ -78,12 +74,10 @@ local raycastParams = RaycastParams.new()
 raycastParams.FilterDescendantsInstances = {character}
 raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 
-
 -- Anti-cheat settings (adjust these values)
-local MAX_SPEED = 25 -- Increased threshold for speed check
-local GROUND_CHECK_DISTANCE = 4 -- Distance for ground check
-local GROUND_CHECK_THRESHOLD = 3 -- Number of consecutive "not on ground" checks before flagging
-local JUMP_EXPLOIT_THRESHOLD = 0.4 -- Increased time threshold for jump exploit
+local MAX_SPEED = 30 -- Increased threshold for speed check
+local GROUND_CHECK_DISTANCE = 5 -- Distance for ground check
+local GROUND_CHECK_THRESHOLD = 5 -- Number of consecutive "not on ground" checks before flagging
 
 -- Function to perform raycast for ground check
 local function isOnGround(humanoidRootPart)
@@ -96,7 +90,7 @@ local notOnGroundCount = 0
 
 -- Function to check for wall collisions
 local function isCollidingWithWall(humanoidRootPart)
-	local WALL_CHECK_DISTANCE = 3 -- studs for wall check
+	local WALL_CHECK_DISTANCE = 2 -- studs for wall check
 	local directions = {
 		Vector3.new(1, 0, 0),
 		Vector3.new(-1, 0, 0),
@@ -123,23 +117,21 @@ local function sendMovementData()
 	local position = humanoidRootPart.Position
 	local velocity = humanoidRootPart.Velocity
 
-	-- More advanced checks
+	-- More advanced checks (examples)
 
 	-- Jump exploit check
-	if isJumping then
-		if tick() - lastJumpTime < JUMP_EXPLOIT_THRESHOLD then
-			jumpCount += 1
-			if jumpCount > 3 then
-				-- Player is likely exploiting jump
-				humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-				jumpCount = 0
-				warn("Jump exploit detected!")
-			end
-		else
+	if isJumping and tick() - lastJumpTime < 0.3 then
+		jumpCount += 1
+		if jumpCount > 4 then
+			-- Player is likely exploiting jump
+			humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
 			jumpCount = 0
+			warn("Jump exploit detected!")
 		end
-		lastJumpTime = tick()
+	else
+		jumpCount = 0
 	end
+	lastJumpTime = tick()
 
 	-- Improved ground check
 	if not isOnGround(humanoidRootPart) and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and not isJumping then
@@ -158,7 +150,6 @@ local function sendMovementData()
 	if isCollidingWithWall(humanoidRootPart) then
 		-- Player might be noclipping
 		humanoidRootPart.CFrame = CFrame.new(lastPosition) -- Reset position
-		lastCorrectedPosition = nil -- Reset lastCorrectedPosition to prevent lerping back
 		warn("NoClip exploit detected!")
 	end
 
@@ -189,16 +180,14 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
 	if input.KeyCode == Enum.KeyCode.LeftShift then
-		isSprinting
-			= true
+		isSprinting = true
 		sendMovementData() -- Send data when sprinting starts
 	end
 end)
 
 UserInputService.InputEnded:Connect(function(input, gameProcessedEvent)
 	if input.KeyCode == Enum.KeyCode.LeftShift then
-		isSprinting 
-			= false
+		isSprinting = false
 		sendMovementData() -- Send data when sprinting ends
 	end
 end)
@@ -232,11 +221,16 @@ RunService.Heartbeat:Connect(function(deltaTime)
 	local averageSpeed = totalSpeed / #speedHistory
 
 	-- Check average speed over time
-	if tick() - lastSpeedCheck >= 0.2 then -- Check every 0.2 seconds
+	if tick() - lastSpeedCheck >= 0.3 then
 		if averageSpeed > MAX_SPEED then
-			-- Take action (e.g., reset position, warn player, etc.)
-			humanoidRootPart.CFrame = CFrame.new(lastPosition)
-			warn("Speed exploit detected!")
+			-- Check player state before flagging
+			if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and 
+				humanoid:GetState() ~= Enum.HumanoidStateType.Jumping and
+				not isJumping then  -- Make sure isJumping is updated correctly in your input handling
+				-- Gradually correct position
+				humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(CFrame.new(lastPosition), 0.2)
+				warn("Speed exploit detected!")
+			end 
 		end
 		lastSpeedCheck = tick()
 	end
