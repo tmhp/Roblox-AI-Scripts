@@ -1,0 +1,240 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Define a debounce to prevent the code from running too often
+local debounce = false
+
+-- Get the RemoteEvent with a timeout to prevent infinite yield
+local timeout = 5 -- seconds
+local playerMovement = ReplicatedStorage:WaitForChild("PlayerMovement", timeout)
+if not playerMovement then
+	warn("PlayerMovement not found after timeout!")
+	return
+end
+
+-- Get the encryption key from the server
+local getEncryptionKey = ReplicatedStorage:WaitForChild("GetEncryptionKey", timeout)
+if not getEncryptionKey then
+	warn("GetEncryptionKey not found after timeout!")
+	return
+end
+
+local encryptionKey = getEncryptionKey:InvokeServer()
+
+-- Function to encrypt data using XOR (Client)
+local function encryptData(data)
+	local encrypted = {}
+	for i = 1, #data do
+		local byte = string.byte(data, i)
+		local encryptedByte = bit32.bxor(byte, encryptionKey)
+		encrypted[i] = math.floor(encryptedByte) % 256 -- Ensure valid ASCII range (0-255)
+	end
+	return string.char(unpack(encrypted))
+end
+
+-- Wait for the character to load
+local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Receive corrected position from the server
+local movementCorrected = ReplicatedStorage:WaitForChild("MovementCorrected")
+
+local lastCorrectedPosition = nil -- Store the last corrected position
+
+movementCorrected.OnClientEvent:Connect(function(newPosition)
+	-- Only update position if the difference is significant
+	local currentPosition = humanoidRootPart.Position
+	if (newPosition - currentPosition).Magnitude > 5 then -- Adjust threshold as needed
+		lastCorrectedPosition = newPosition
+	end
+
+	-- Smoothly move the character towards the last corrected position
+	if lastCorrectedPosition then
+		humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(CFrame.new(lastCorrectedPosition), 0.2) -- Adjust interpolation factor as needed
+	end
+end)
+
+-- Variables to track user input state
+local isJumping = false
+local isSprinting = false
+
+-- Variables for more advanced checks
+local lastJumpTime = 0
+local jumpCount = 0
+local lastPosition = humanoidRootPart.Position
+local lastVelocity = Vector3.new(0, 0, 0)
+
+-- Raycast parameters for ground and wall checks
+local raycastParams = RaycastParams.new()
+raycastParams.FilterDescendantsInstances = {character}
+raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+-- Anti-cheat settings (adjust these values)
+local MAX_SPEED = 22 -- Increased threshold for speed check
+local GROUND_CHECK_DISTANCE = 4 -- Distance for ground check
+local GROUND_CHECK_THRESHOLD = 3 -- Number of consecutive "not on ground" checks before flagging
+
+-- Function to perform raycast for ground check
+local function isOnGround(humanoidRootPart)
+	local raycastResult = workspace:Raycast(humanoidRootPart.Position, Vector3.new(0, -GROUND_CHECK_DISTANCE, 0), raycastParams)
+	return raycastResult ~= nil
+end
+
+-- Variables for ground check
+local notOnGroundCount = 0
+
+-- Function to check for wall collisions
+local function isCollidingWithWall(humanoidRootPart)
+	local WALL_CHECK_DISTANCE = 3 -- studs for wall check
+	local directions = {
+		Vector3.new(1, 0, 0),
+		Vector3.new(-1, 0, 0),
+		Vector3.new(0, 0, 1),
+		Vector3.new(0, 0, -1)
+	}
+
+	for _, direction in ipairs(directions) do
+		local raycastResult = workspace:Raycast(humanoidRootPart.Position, direction * WALL_CHECK_DISTANCE, raycastParams)
+		if raycastResult then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Function to send player movement data to the server
+local function sendMovementData()
+	if debounce then return end
+	debounce = true
+
+	-- Get the player's position and velocity
+	local position = humanoidRootPart.Position
+	local velocity = humanoidRootPart.Velocity
+
+	-- More advanced checks (examples)
+
+	-- Jump exploit check
+	if isJumping and tick() - lastJumpTime < 0.5 then
+		jumpCount += 1
+		if jumpCount > 3 then
+			-- Player is likely exploiting jump
+			humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
+			jumpCount = 0
+			warn("Jump exploit detected!")
+		end
+	else
+		jumpCount = 0
+	end
+	lastJumpTime = tick()
+
+	-- Improved ground check
+	if not isOnGround(humanoidRootPart) and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and not isJumping then
+		notOnGroundCount += 1
+		if notOnGroundCount >= GROUND_CHECK_THRESHOLD then
+			-- Player might be flying
+			humanoid:ChangeState(Enum.HumanoidStateType.Freefall) -- Force freefall
+			warn("Fly exploit detected!")
+			notOnGroundCount = 0 -- Reset the count
+		end
+	else
+		notOnGroundCount = 0 -- Reset the count if on ground
+	end
+
+	-- NoClip check (client-side)
+	if isCollidingWithWall(humanoidRootPart) then
+		-- Player might be noclipping
+		humanoidRootPart.CFrame = CFrame.new(lastPosition) -- Reset position
+		warn("NoClip exploit detected!")
+	end
+
+	-- Convert Vector3 values to strings
+	local positionString = tostring(position.X) .. "," .. tostring(position.Y) .. "," .. tostring(position.Z)
+	local velocityString = tostring(velocity.X) .. "," .. tostring(velocity.Y) .. "," .. tostring(velocity.Z)
+
+	-- Encrypt the position and velocity strings
+	local encryptedPosition = encryptData(positionString)
+	local encryptedVelocity = encryptData(velocityString)
+
+	-- Send the encrypted data to the server
+	playerMovement:FireServer(encryptedPosition, encryptedVelocity)
+
+	-- Update last position and velocity
+	lastPosition = position
+	lastVelocity = velocity
+
+	wait(0.2) -- Increased wait time to reduce frequency
+	debounce = false
+end
+
+-- Connect to user input events
+UserInputService.JumpRequest:Connect(function()
+	isJumping = true
+	sendMovementData() -- Send data when jump is requested
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if input.KeyCode == Enum.KeyCode.LeftShift then
+		isSprinting = true
+		sendMovementData() -- Send data when sprinting starts
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessedEvent)
+	if input.KeyCode == Enum.KeyCode.LeftShift then
+		isSprinting = false
+		sendMovementData() -- Send data when sprinting ends
+	end
+end)
+
+-- Disable CoreGui to prevent exploiters from manipulating it
+StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+
+-- Anti-speed hack (basic example)
+local lastPosition = humanoidRootPart.Position
+local lastSpeedCheck = tick()
+local speedHistory = {}
+local speedHistorySize = 5 -- Number of speed samples to keep
+
+RunService.Heartbeat:Connect(function(deltaTime)
+	local currentPosition = humanoidRootPart.Position
+
+	local distance = (currentPosition - lastPosition).Magnitude
+	local speed = distance / deltaTime
+
+	-- Store speed in history
+	table.insert(speedHistory, speed)
+	if #speedHistory > speedHistorySize then
+		table.remove(speedHistory, 1)
+	end
+
+	-- Calculate average speed
+	local totalSpeed = 0
+	for _, s in ipairs(speedHistory) do
+		totalSpeed += s
+	end
+	local averageSpeed = totalSpeed / #speedHistory
+
+	-- Check average speed over time
+	if tick() - lastSpeedCheck >= 0.2 then -- Check every 0.2 seconds
+		if averageSpeed > MAX_SPEED then
+			-- Take action (e.g., reset position, warn player, etc.)
+			humanoidRootPart.CFrame = CFrame.new(lastPosition)
+			warn("Speed exploit detected!")
+		end
+		lastSpeedCheck = tick()
+	end
+
+	lastPosition = currentPosition
+end)
+
+-- Movement replication loop (reduced frequency)
+while true do
+	wait(0.2) -- Increased wait time to reduce frequency
+	sendMovementData()
+end
