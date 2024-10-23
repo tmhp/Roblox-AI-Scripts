@@ -1,0 +1,302 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
+local HttpService = game:GetService("HttpService") -- For webhook logging
+local RunService = game:GetService("RunService")
+local NetworkOwnership = game:GetService("NetworkOwnership")
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function(character)
+		-- Wait   
+		game:GetService("RunService").Heartbeat:Wait() 
+
+		-- Essential parts for smooth client-side interaction
+		local essentialParts = {
+			character:WaitForChild("HumanoidRootPart"),
+			character:WaitForChild("Head"),
+			-- Add other essential parts here
+		}
+
+		-- Set network ownership for essential parts
+		for _, part in ipairs(essentialParts) do
+			pcall(function() 
+				NetworkOwnership.SetNetworkOwner(NetworkOwnership, part, player)
+			end)
+		end
+	end)
+end)
+
+-- Anti-cheat settings
+local ACCELERATION_THRESHOLD = 50 -- studs per second squared
+local JUMP_POWER_THRESHOLD = 50
+local FLY_CHECK_INTERVAL = 0.2 -- seconds
+local MAX_FLY_TIME = 1 -- seconds
+local TELEPORT_THRESHOLD = 20 -- studs
+local RAYCAST_DISTANCE = 4 -- studs for ground check
+local MAX_SPEED = 16 -- studs per second
+local ALLOWED_JUMP_HEIGHT = 50 -- studs
+
+-- Kick/Ban system settings
+local MAX_WARNINGS = 3
+local KICK_MESSAGE = "You have been kicked for suspected cheating."
+local BAN_MESSAGE = "You have been permanently banned for cheating."
+
+-- Behavioral analysis settings
+local BEHAVIOR_CHECK_INTERVAL = 1 -- second
+local ACTION_FREQUENCY_THRESHOLD = 2 -- Number of standard deviations above the mean to trigger a warning
+local HEALTH_DROP_THRESHOLD = 20 -- Percentage of health drop to trigger warning
+local HEALTH_DROP_FREQUENCY_THRESHOLD = 3 -- Number of suspicious health drops per minute
+local COOLDOWN_TIME = 5 -- Cooldown time in seconds for health drop check
+
+-- Datastores
+local banDataStore = DataStoreService:GetDataStore("BanData")
+local cheatLogsDataStore = DataStoreService:GetDataStore("CheatLogs") -- For cheat logs
+
+-- Remote event for client-to-server communication
+local playerMovement = ReplicatedStorage:FindFirstChild("PlayerMovement") 
+	or Instance.new("RemoteEvent", ReplicatedStorage)
+playerMovement.Name = "PlayerMovement"
+
+-- CREATE the KickRemote here
+local KickRemote = Instance.new("RemoteEvent")
+KickRemote.Name = "KickRemote"
+KickRemote.Parent = ReplicatedStorage
+
+-- Create a RemoteEvent to notify the client of corrected position
+local movementCorrected = Instance.new("RemoteEvent") -- Place it here
+movementCorrected.Name = "MovementCorrected"
+movementCorrected.Parent = ReplicatedStorage
+
+-- Generate a random encryption key (keep this secure!)
+local encryptionKey = math.random(100000, 999999) 
+
+-- Function to encrypt data using a simple XOR cipher
+local function encryptData(data, key)
+	local encrypted = {}
+	for i = 1, #data do
+		local byte = string.byte(data, i)  -- Get the byte value
+		local result = bit32.bxor(byte, key)  -- Perform XOR operation
+		encrypted[i] = math.floor(result) % 256  -- Ensure it's a valid ASCII code (0-255)
+	end
+	return string.char(unpack(encrypted))  -- Convert to string
+end
+-- Function to decrypt data (XOR is symmetric)
+local function decryptData(data, key)
+	return encryptData(data, key)
+end
+
+-- Remote function to provide the encryption key to the client
+local getEncryptionKey = Instance.new("RemoteFunction")
+getEncryptionKey.Name = "GetEncryptionKey"
+getEncryptionKey.Parent = ReplicatedStorage
+
+getEncryptionKey.OnServerInvoke = function(player)
+	-- You might add player verification here
+	return encryptionKey
+end
+
+-- Server-side player data
+local playerData = {}
+
+-- Function to create player data
+local function createPlayerData(player)
+	local data = {
+		lastPosition = Vector3.new(0, 0, 0),
+		lastVelocity = Vector3.new(0, 0, 0),
+		lastCheckTime = tick(),
+		lastGroundCheck = tick(),
+		airTime = 0,
+		warnings = 0,
+		serverCharacter = nil,
+		actionHistory = {},
+		actionHistorySize = 60,
+		healthDropCount = 0,
+		lastHealthDropCheck = tick(), 
+		lastHealth = 100,
+		lastBehaviorCheck = tick(),
+		lastJumpPosition = nil
+		-- Add more variables for other checks as needed
+	}
+	playerData[player] = data
+end
+
+-- Function to log cheat detections
+local function logCheatDetection(player, reason)
+end
+
+-- Function to check if a player is banned
+local function isPlayerBanned(player)
+end
+
+-- Function to ban a player
+local function banPlayer(player, reason)
+end
+
+-- Function to issue a warning and kick/ban if necessary
+local function issueWarning(player, reason)
+end
+
+-- Function to create a server-side representation of the character
+local function createServerCharacter(player, character)
+end
+
+-- Function to perform raycast for ground check
+local function isOnGround(humanoidRootPart)
+end
+
+-- Handle player movement data from the client
+playerMovement.OnServerEvent:Connect(function(player, encryptedPosition, encryptedVelocity)
+	-- Decrypt the position and velocity data
+	local positionString = decryptData(encryptedPosition, encryptionKey)
+	local velocityString = decryptData(encryptedVelocity, encryptionKey)
+
+	-- Convert the decrypted strings back to Vector3 values
+	local position = Vector3.new(unpack(string.split(positionString, ",")))
+	local velocity = Vector3.new(unpack(string.split(velocityString, ",")))
+
+
+-- Function to validate and update server character position
+local function validatePlayerMovement(player, position, velocity)
+	local data = playerData[player]
+	local serverCharacter = data.serverCharacter
+	if serverCharacter then
+		local humanoidRootPart = serverCharacter:FindFirstChild("HumanoidRootPart")
+		if humanoidRootPart then
+			local currentTime = tick()
+			local currentPosition = humanoidRootPart.Position
+			local currentVelocity = humanoidRootPart.Velocity
+			local timeElapsed = currentTime - data.lastCheckTime
+
+			-- Speed check
+			local speed = (position - currentPosition).Magnitude / timeElapsed
+			if speed > MAX_SPEED then
+				issueWarning(player, "Speed hacking detected.")
+				humanoidRootPart.CFrame = CFrame.new(data.lastPosition) -- Reset position
+				return
+			end
+
+			-- Acceleration check
+			local acceleration = (velocity - currentVelocity).Magnitude / timeElapsed
+			if acceleration > ACCELERATION_THRESHOLD then
+				issueWarning(player, "Acceleration hacking detected.")
+				return
+			end
+
+			-- Teleport check
+			if (position - currentPosition).Magnitude > TELEPORT_THRESHOLD then
+				issueWarning(player, "Teleportation detected.")
+				humanoidRootPart.CFrame = CFrame.new(data.lastPosition) -- Reset position
+				return
+			end
+
+			-- Fly check
+			if not isOnGround(humanoidRootPart) then
+				data.airTime = data.airTime + (currentTime - data.lastGroundCheck)
+				if data.airTime > MAX_FLY_TIME then
+					issueWarning(player, "Flying detected.")
+					return
+				end
+			else
+				data.airTime = 0
+
+				-- Jump height check
+				if data.lastJumpPosition then
+					local jumpHeight = humanoidRootPart.Position.Y - data.lastJumpPosition.Y
+					if jumpHeight > ALLOWED_JUMP_HEIGHT then
+						issueWarning(player, "Jump hacking detected.")
+						return
+					end
+				end
+				data.lastJumpPosition = humanoidRootPart.Position
+			end
+
+			-- Update server character and player data
+			humanoidRootPart.CFrame = CFrame.new(position)
+			humanoidRootPart.Velocity = velocity
+			data.lastPosition = position
+			data.lastVelocity = velocity
+			data.lastCheckTime = currentTime
+			data.lastGroundCheck = currentTime
+
+			-- Send the corrected position back to the client
+			movementCorrected:FireClient(player, position) -- Fire the RemoteEvent
+		end
+
+		-- Create a RemoteEvent to notify the client of corrected position
+		local movementCorrected = Instance.new("RemoteEvent")
+		movementCorrected.Name = "MovementCorrected"
+		movementCorrected.Parent = ReplicatedStorage
+
+		-- Function to monitor player events (e.g., health changes, tool usage)
+		local function monitorPlayerEvents(player, character)
+			local humanoid = character:WaitForChild("Humanoid")
+			local data = playerData[player]
+
+			-- Health changed event with cooldown
+			humanoid.HealthChanged:Connect(function(newHealth)
+				local healthDrop = data.lastHealth - newHealth
+
+				-- Prevent division by zero, ensure correct percentage calculation, and apply cooldown
+				if data.lastHealth > 0 and 
+					healthDrop > 0 and 
+					(healthDrop / data.lastHealth) * 100 > HEALTH_DROP_THRESHOLD and 
+					tick() - data.lastHealthDropCheck > COOLDOWN_TIME then 
+
+					data.healthDropCount = data.healthDropCount + 1
+					data.lastHealthDropCheck = tick() -- Update the last health drop check time
+				end
+
+				data.lastHealth = newHealth
+			end)
+		end
+
+		-- Function to perform behavioral analysis
+		local function analyzePlayerBehavior(player)
+			local data = playerData[player]
+			local currentTime = tick()
+			local timeElapsed = currentTime - data.lastBehaviorCheck
+
+			if timeElapsed >= BEHAVIOR_CHECK_INTERVAL then
+				-- Calculate action frequency
+				local actionsPerSecond = #data.actionHistory / timeElapsed
+
+				-- Calculate mean and standard deviation of action frequency (if enough data)
+				if #data.actionHistory > 1 then
+					local sum = 0
+					local sumSquares = 0 -- For optimization
+					for _, timestamp in ipairs(data.actionHistory) do  -- The 'for' loop starts here
+						sum = sum + timestamp
+						sumSquares = sumSquares + timestamp^2
+					end  -- The 'for' loop ends here - make sure 'do' is before this 'end'
+
+					local mean = sum / #data.actionHistory
+					local variance = (sumSquares - (sum^2 / #data.actionHistory)) / (#data.actionHistory - 1) -- Optimized variance
+					local stdDev = math.sqrt(variance)
+
+					-- Check if action frequency is significantly above the mean
+					if actionsPerSecond > mean + ACTION_FREQUENCY_THRESHOLD * stdDev then
+						issueWarning(player, "Suspicious action frequency detected.")
+					end
+				end
+			end
+		end
+	end
+
+	-- Check for frequent health drops
+	if currentTime - data.lastHealthDropCheck >= 60 then -- Check every minute
+		if data.healthDropCount > HEALTH_DROP_FREQUENCY_THRESHOLD then
+			issueWarning(player, "Frequent suspicious health drops detected.")
+		end
+		data.healthDropCount = 0
+		data.lastHealthDropCheck = currentTime
+	end
+
+	-- Update action history
+	while #data.actionHistory > 0 and currentTime - data.actionHistory[1] > data.actionHistorySize do
+		table.remove(data.actionHistory, 1)
+	end
+
+		-- Reset and update tracking variables
+		data.lastBehaviorCheck = currentTime
+	end
+end)
