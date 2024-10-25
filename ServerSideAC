@@ -1,302 +1,332 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local DataStoreService = game:GetService("DataStoreService")
-local HttpService = game:GetService("HttpService") -- For webhook logging
 local RunService = game:GetService("RunService")
 local NetworkOwnership = game:GetService("NetworkOwnership")
+local HttpService = game:GetService("HttpService")
+local DataStoreService = game:GetService("DataStoreService")
+local PhysicsService = game:GetService("PhysicsService")
 
-Players.PlayerAdded:Connect(function(player)
-	player.CharacterAdded:Connect(function(character)
-		-- Wait   
-		game:GetService("RunService").Heartbeat:Wait() 
+-- Obfuscate important variable names
+local _a, _b, _c, _d = Players, ReplicatedStorage, RunService, NetworkOwnership
+local _e, _f, _g = HttpService, DataStoreService, PhysicsService
 
-		-- Essential parts for smooth client-side interaction
-		local essentialParts = {
-			character:WaitForChild("HumanoidRootPart"),
-			character:WaitForChild("Head"),
-			-- Add other essential parts here
-		}
+-- Create a secure random number generator
+local random = Random.new(tick())
 
-		-- Set network ownership for essential parts
-		for _, part in ipairs(essentialParts) do
-			pcall(function() 
-				NetworkOwnership.SetNetworkOwner(NetworkOwnership, part, player)
-			end)
+-- Encryption key rotation
+local encryptionKeys = {}
+local function rotateEncryptionKey()
+	table.insert(encryptionKeys, 1, _e:GenerateGUID(false))
+	if #encryptionKeys > 5 then
+		table.remove(encryptionKeys)
+	end
+end
+rotateEncryptionKey()
+_c.Heartbeat:Connect(function()
+	if random:NextNumber() < 0.001 then  -- 0.1% chance each heartbeat
+		rotateEncryptionKey()
+	end
+end)
+
+local playerMovement = _b:FindFirstChild("PlayerMovement")
+if not playerMovement then
+	playerMovement = Instance.new("RemoteEvent")
+	playerMovement.Name = "PlayerMovement"
+	playerMovement.Parent = _b
+end
+
+local kickRemote = _b:FindFirstChild("KickRemote")
+if not kickRemote then
+	kickRemote = Instance.new("RemoteEvent")
+	kickRemote.Name = "KickRemote"
+	kickRemote.Parent = _b
+end
+
+game:GetService("LogService").MessageOut:Connect(function() return end)
+
+local encryptionKeyValue = _b:FindFirstChild("EncryptionKey")
+if not encryptionKeyValue then
+	encryptionKeyValue = Instance.new("StringValue")
+	encryptionKeyValue.Name = "EncryptionKey"
+	encryptionKeyValue.Parent = _b
+	encryptionKeyValue.Value = _e:GenerateGUID(false)
+end
+
+local encryptionKey = encryptionKeyValue.Value
+
+-- Constants (obfuscated)
+local _h, _i, _j = 100, 50, 3  -- MAX_SPEED, TELEPORT_THRESHOLD, VIOLATION_THRESHOLD
+local _k, _l = 0.5, 86400 * 7  -- CHECK_INTERVAL, BAN_DURATION
+local _m = "You have been banned for 7 days due to suspicious activity. If you believe this is an error, please contact our support team."
+local _n, _o, _p = 16, 0.1, 70  -- DEFAULT_WALK_SPEED, WALK_SPEED_TOLERANCE, MAX_ALLOWED_WALKSPEED
+local _q, _r, _s = 20, 1, 5  -- RAPID_INPUT_THRESHOLD, RAPID_INPUT_TIME_FRAME, TELEPORT_COOLDOWN
+
+local playerData = {}
+
+local mockDataStore = {}
+function mockDataStore:GetAsync(key) return nil end
+function mockDataStore:SetAsync(key, value) end
+function mockDataStore:RemoveAsync(key) end
+
+local banStore
+if _c:IsStudio() then
+	banStore = mockDataStore
+else
+	banStore = _f:GetDataStore("PlayerBans_v2")
+end
+
+-- Function to get player from script
+local function getPlayerFromScript(script)
+	while script do
+		local player = _a:GetPlayerFromCharacter(script:FindFirstAncestorOfClass("Model"))
+		if player then
+			return player
+		end
+		script = script.Parent
+	end
+	return nil
+end
+
+-- Secure function wrapper
+local function _t(func)
+	return function(...)
+		if debug.info(2, "s") ~= script.Name then
+			local player = getPlayerFromScript(getfenv(2).script)
+			if player then
+				_u(player, "Security violation detected.")
+			else
+				warn("Security violation detected, but couldn't identify the player.")
+			end
+			return
+		end
+		return func(...)
+	end
+end
+
+local secureCallCache = {}
+local function secureCall(func, ...)
+	local key = tostring(func)
+	if not secureCallCache[key] then
+		secureCallCache[key] = function(...)
+			return coroutine.wrap(function(...)
+				return func(...)
+			end)(...)
+		end
+	end
+	return secureCallCache[key](...)
+end
+
+local function isPlayerBanned(player)
+	local success, result = pcall(function()
+		return banStore:GetAsync(player.UserId)
+	end)
+
+	if success and result then
+		local banExpiration = result.expiration
+		if banExpiration > os.time() then
+			return true
+		else
+			banStore:RemoveAsync(player.UserId)
+		end
+	end
+
+	return false
+end
+
+local function _u(player, reason)
+	player:Kick(reason)
+end
+_u = _t(_u)
+
+local function banPlayer(player)
+	local banExpiration = os.time() + _l
+	local success, errorMessage = pcall(function()
+		banStore:SetAsync(player.UserId, {expiration = banExpiration})
+	end)
+
+	if success then
+		_u(player, _m)
+	end
+end
+banPlayer = _t(banPlayer)
+
+local function createPlayerData(player)
+	playerData[player] = {
+		lastPosition = Vector3.new(0, 0, 0),
+		lastCheckTime = tick(),
+		violations = 0,
+		lastTeleportTime = 0,
+		inputHistory = {},
+		spawnTime = tick(),
+		originalWalkSpeed = _n
+	}
+end
+
+local function removePlayerData(player)
+	playerData[player] = nil
+end
+
+local function decryptData(encryptedData)
+	local success, result = pcall(function()
+		local dataBytes = {string.byte(encryptedData, 1, -1)}
+		local keyBytes = {string.byte(encryptionKeys[1], 1, -1)}
+		local iv = {unpack(dataBytes, 1, 16)}
+		table.remove(dataBytes, 1, 16)
+		local decrypted = table.create(#dataBytes, 0)
+		for i = 1, #dataBytes do
+			decrypted[i] = bit32.bxor(dataBytes[i], keyBytes[(i - 1) % #keyBytes + 1], iv[(i - 1) % 16 + 1])
+		end
+		return string.char(unpack(decrypted))
+	end)
+
+	return success and result or nil
+end
+
+local function validatePlayerMovement(player, position, velocity)
+	local data = playerData[player]
+	if not data then return end
+
+	local currentTime = tick()
+	local timeDelta = currentTime - data.lastCheckTime
+	local distanceMoved = (position - data.lastPosition).Magnitude
+	local speed = distanceMoved / timeDelta
+
+	if speed > _h then
+		data.violations = data.violations + 1
+	end
+
+	if data.violations >= _j then
+		banPlayer(player)
+	end
+
+	data.lastPosition = position
+	data.lastCheckTime = currentTime
+end
+
+local function handlePossibleTeleport(player, distance)
+	local data = playerData[player]
+	if not data then return end
+
+	local currentTime = tick()
+	if currentTime - data.lastTeleportTime < _s then
+		data.violations = data.violations + 1
+		if data.violations >= _j then
+			banPlayer(player)
+		end
+	else
+		data.lastTeleportTime = currentTime
+	end
+end
+
+local function handleWalkSpeedChange(player, newWalkSpeed)
+	local data = playerData[player]
+	if not data then return end
+
+	if math.abs(newWalkSpeed - data.originalWalkSpeed) > _o then
+		_u(player, "Unexpected WalkSpeed change detected.")
+	end
+end
+
+local function handleInputDetected(player, inputInfo)
+	local data = playerData[player]
+	if not data then return end
+
+	local currentTime = tick()
+	data.inputHistory[#data.inputHistory + 1] = currentTime
+
+	while #data.inputHistory > 0 and currentTime - data.inputHistory[1] > _r do
+		table.remove(data.inputHistory, 1)
+	end
+
+	if #data.inputHistory >= _q then
+		data.violations = data.violations + 1
+		if data.violations >= _j then
+			banPlayer(player)
+		end
+	end
+end
+
+local function onCharacterAdded(player, character)
+	task.wait(1)  -- Wait for 1 second after character spawn
+
+	createPlayerData(player)
+	playerData[player].spawnTime = tick()
+
+	local essentialParts = {
+		character:WaitForChild("HumanoidRootPart"),
+		character:WaitForChild("Head"),
+	}
+
+	for _, part in ipairs(essentialParts) do
+		pcall(function() 
+			_d.SetNetworkOwner(_d, part, player)
+		end)
+	end
+
+	local humanoid = character:WaitForChild("Humanoid")
+	local originalWalkSpeed = humanoid.WalkSpeed
+	playerData[player].originalWalkSpeed = originalWalkSpeed
+
+	humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+		if math.abs(humanoid.WalkSpeed - originalWalkSpeed) > _o then
+			_u(player, "Unexpected WalkSpeed change detected on server.")
+		end
+	end)
+end
+
+playerMovement.OnServerEvent:Connect(function(player, encryptedData1, encryptedData2)
+	secureCall(function()
+		local data1 = decryptData(encryptedData1)
+		local data2 = encryptedData2 and decryptData(encryptedData2) or ""
+
+		if data1 then
+			if data1:sub(1, 23) == "PossibleTeleportDetected" then
+				local distance = tonumber(data1:sub(25))
+				handlePossibleTeleport(player, distance)
+			elseif data1:sub(1, 16) == "WalkSpeedChanged" then
+				local newWalkSpeed = tonumber(data1:sub(18))
+				handleWalkSpeedChange(player, newWalkSpeed)
+			elseif data1:sub(1, 13) == "InputDetected" then
+				local inputInfo = data1:sub(15)
+				handleInputDetected(player, inputInfo)
+			else
+				local positionParts = string.split(data1, ",")
+				local velocityParts = string.split(data2, ",")
+
+				if #positionParts == 3 and #velocityParts == 3 then
+					local position = Vector3.new(tonumber(positionParts[1]), tonumber(positionParts[2]), tonumber(positionParts[3]))
+					local velocity = Vector3.new(tonumber(velocityParts[1]), tonumber(velocityParts[2]), tonumber(velocityParts[3]))
+					validatePlayerMovement(player, position, velocity)
+				end
+			end
 		end
 	end)
 end)
 
--- Anti-cheat settings
-local ACCELERATION_THRESHOLD = 50 -- studs per second squared
-local JUMP_POWER_THRESHOLD = 50
-local FLY_CHECK_INTERVAL = 0.2 -- seconds
-local MAX_FLY_TIME = 1 -- seconds
-local TELEPORT_THRESHOLD = 20 -- studs
-local RAYCAST_DISTANCE = 4 -- studs for ground check
-local MAX_SPEED = 16 -- studs per second
-local ALLOWED_JUMP_HEIGHT = 50 -- studs
-
--- Kick/Ban system settings
-local MAX_WARNINGS = 3
-local KICK_MESSAGE = "You have been kicked for suspected cheating."
-local BAN_MESSAGE = "You have been permanently banned for cheating."
-
--- Behavioral analysis settings
-local BEHAVIOR_CHECK_INTERVAL = 1 -- second
-local ACTION_FREQUENCY_THRESHOLD = 2 -- Number of standard deviations above the mean to trigger a warning
-local HEALTH_DROP_THRESHOLD = 20 -- Percentage of health drop to trigger warning
-local HEALTH_DROP_FREQUENCY_THRESHOLD = 3 -- Number of suspicious health drops per minute
-local COOLDOWN_TIME = 5 -- Cooldown time in seconds for health drop check
-
--- Datastores
-local banDataStore = DataStoreService:GetDataStore("BanData")
-local cheatLogsDataStore = DataStoreService:GetDataStore("CheatLogs") -- For cheat logs
-
--- Remote event for client-to-server communication
-local playerMovement = ReplicatedStorage:FindFirstChild("PlayerMovement") 
-	or Instance.new("RemoteEvent", ReplicatedStorage)
-playerMovement.Name = "PlayerMovement"
-
--- CREATE the KickRemote here
-local KickRemote = Instance.new("RemoteEvent")
-KickRemote.Name = "KickRemote"
-KickRemote.Parent = ReplicatedStorage
-
--- Create a RemoteEvent to notify the client of corrected position
-local movementCorrected = Instance.new("RemoteEvent") -- Place it here
-movementCorrected.Name = "MovementCorrected"
-movementCorrected.Parent = ReplicatedStorage
-
--- Generate a random encryption key (keep this secure!)
-local encryptionKey = math.random(100000, 999999) 
-
--- Function to encrypt data using a simple XOR cipher
-local function encryptData(data, key)
-	local encrypted = {}
-	for i = 1, #data do
-		local byte = string.byte(data, i)  -- Get the byte value
-		local result = bit32.bxor(byte, key)  -- Perform XOR operation
-		encrypted[i] = math.floor(result) % 256  -- Ensure it's a valid ASCII code (0-255)
-	end
-	return string.char(unpack(encrypted))  -- Convert to string
-end
--- Function to decrypt data (XOR is symmetric)
-local function decryptData(data, key)
-	return encryptData(data, key)
-end
-
--- Remote function to provide the encryption key to the client
-local getEncryptionKey = Instance.new("RemoteFunction")
-getEncryptionKey.Name = "GetEncryptionKey"
-getEncryptionKey.Parent = ReplicatedStorage
-
-getEncryptionKey.OnServerInvoke = function(player)
-	-- You might add player verification here
-	return encryptionKey
-end
-
--- Server-side player data
-local playerData = {}
-
--- Function to create player data
-local function createPlayerData(player)
-	local data = {
-		lastPosition = Vector3.new(0, 0, 0),
-		lastVelocity = Vector3.new(0, 0, 0),
-		lastCheckTime = tick(),
-		lastGroundCheck = tick(),
-		airTime = 0,
-		warnings = 0,
-		serverCharacter = nil,
-		actionHistory = {},
-		actionHistorySize = 60,
-		healthDropCount = 0,
-		lastHealthDropCheck = tick(), 
-		lastHealth = 100,
-		lastBehaviorCheck = tick(),
-		lastJumpPosition = nil
-		-- Add more variables for other checks as needed
-	}
-	playerData[player] = data
-end
-
--- Function to log cheat detections
-local function logCheatDetection(player, reason)
-end
-
--- Function to check if a player is banned
-local function isPlayerBanned(player)
-end
-
--- Function to ban a player
-local function banPlayer(player, reason)
-end
-
--- Function to issue a warning and kick/ban if necessary
-local function issueWarning(player, reason)
-end
-
--- Function to create a server-side representation of the character
-local function createServerCharacter(player, character)
-end
-
--- Function to perform raycast for ground check
-local function isOnGround(humanoidRootPart)
-end
-
--- Handle player movement data from the client
-playerMovement.OnServerEvent:Connect(function(player, encryptedPosition, encryptedVelocity)
-	-- Decrypt the position and velocity data
-	local positionString = decryptData(encryptedPosition, encryptionKey)
-	local velocityString = decryptData(encryptedVelocity, encryptionKey)
-
-	-- Convert the decrypted strings back to Vector3 values
-	local position = Vector3.new(unpack(string.split(positionString, ",")))
-	local velocity = Vector3.new(unpack(string.split(velocityString, ",")))
-
-
--- Function to validate and update server character position
-local function validatePlayerMovement(player, position, velocity)
-	local data = playerData[player]
-	local serverCharacter = data.serverCharacter
-	if serverCharacter then
-		local humanoidRootPart = serverCharacter:FindFirstChild("HumanoidRootPart")
-		if humanoidRootPart then
-			local currentTime = tick()
-			local currentPosition = humanoidRootPart.Position
-			local currentVelocity = humanoidRootPart.Velocity
-			local timeElapsed = currentTime - data.lastCheckTime
-
-			-- Speed check
-			local speed = (position - currentPosition).Magnitude / timeElapsed
-			if speed > MAX_SPEED then
-				issueWarning(player, "Speed hacking detected.")
-				humanoidRootPart.CFrame = CFrame.new(data.lastPosition) -- Reset position
-				return
-			end
-
-			-- Acceleration check
-			local acceleration = (velocity - currentVelocity).Magnitude / timeElapsed
-			if acceleration > ACCELERATION_THRESHOLD then
-				issueWarning(player, "Acceleration hacking detected.")
-				return
-			end
-
-			-- Teleport check
-			if (position - currentPosition).Magnitude > TELEPORT_THRESHOLD then
-				issueWarning(player, "Teleportation detected.")
-				humanoidRootPart.CFrame = CFrame.new(data.lastPosition) -- Reset position
-				return
-			end
-
-			-- Fly check
-			if not isOnGround(humanoidRootPart) then
-				data.airTime = data.airTime + (currentTime - data.lastGroundCheck)
-				if data.airTime > MAX_FLY_TIME then
-					issueWarning(player, "Flying detected.")
-					return
-				end
-			else
-				data.airTime = 0
-
-				-- Jump height check
-				if data.lastJumpPosition then
-					local jumpHeight = humanoidRootPart.Position.Y - data.lastJumpPosition.Y
-					if jumpHeight > ALLOWED_JUMP_HEIGHT then
-						issueWarning(player, "Jump hacking detected.")
-						return
-					end
-				end
-				data.lastJumpPosition = humanoidRootPart.Position
-			end
-
-			-- Update server character and player data
-			humanoidRootPart.CFrame = CFrame.new(position)
-			humanoidRootPart.Velocity = velocity
-			data.lastPosition = position
-			data.lastVelocity = velocity
-			data.lastCheckTime = currentTime
-			data.lastGroundCheck = currentTime
-
-			-- Send the corrected position back to the client
-			movementCorrected:FireClient(player, position) -- Fire the RemoteEvent
-		end
-
-		-- Create a RemoteEvent to notify the client of corrected position
-		local movementCorrected = Instance.new("RemoteEvent")
-		movementCorrected.Name = "MovementCorrected"
-		movementCorrected.Parent = ReplicatedStorage
-
-		-- Function to monitor player events (e.g., health changes, tool usage)
-		local function monitorPlayerEvents(player, character)
-			local humanoid = character:WaitForChild("Humanoid")
-			local data = playerData[player]
-
-			-- Health changed event with cooldown
-			humanoid.HealthChanged:Connect(function(newHealth)
-				local healthDrop = data.lastHealth - newHealth
-
-				-- Prevent division by zero, ensure correct percentage calculation, and apply cooldown
-				if data.lastHealth > 0 and 
-					healthDrop > 0 and 
-					(healthDrop / data.lastHealth) * 100 > HEALTH_DROP_THRESHOLD and 
-					tick() - data.lastHealthDropCheck > COOLDOWN_TIME then 
-
-					data.healthDropCount = data.healthDropCount + 1
-					data.lastHealthDropCheck = tick() -- Update the last health drop check time
-				end
-
-				data.lastHealth = newHealth
-			end)
-		end
-
-		-- Function to perform behavioral analysis
-		local function analyzePlayerBehavior(player)
-			local data = playerData[player]
-			local currentTime = tick()
-			local timeElapsed = currentTime - data.lastBehaviorCheck
-
-			if timeElapsed >= BEHAVIOR_CHECK_INTERVAL then
-				-- Calculate action frequency
-				local actionsPerSecond = #data.actionHistory / timeElapsed
-
-				-- Calculate mean and standard deviation of action frequency (if enough data)
-				if #data.actionHistory > 1 then
-					local sum = 0
-					local sumSquares = 0 -- For optimization
-					for _, timestamp in ipairs(data.actionHistory) do  -- The 'for' loop starts here
-						sum = sum + timestamp
-						sumSquares = sumSquares + timestamp^2
-					end  -- The 'for' loop ends here - make sure 'do' is before this 'end'
-
-					local mean = sum / #data.actionHistory
-					local variance = (sumSquares - (sum^2 / #data.actionHistory)) / (#data.actionHistory - 1) -- Optimized variance
-					local stdDev = math.sqrt(variance)
-
-					-- Check if action frequency is significantly above the mean
-					if actionsPerSecond > mean + ACTION_FREQUENCY_THRESHOLD * stdDev then
-						issueWarning(player, "Suspicious action frequency detected.")
-					end
-				end
-			end
-		end
+_a.PlayerAdded:Connect(function(player)
+	if isPlayerBanned(player) then
+		_u(player, _m)
+		return
 	end
 
-	-- Check for frequent health drops
-	if currentTime - data.lastHealthDropCheck >= 60 then -- Check every minute
-		if data.healthDropCount > HEALTH_DROP_FREQUENCY_THRESHOLD then
-			issueWarning(player, "Frequent suspicious health drops detected.")
+	player.CharacterAdded:Connect(function(character)
+		onCharacterAdded(player, character)
+	end)
+
+	if player.Character then
+		onCharacterAdded(player, player.Character)
+	end
+end)
+
+_a.PlayerRemoving:Connect(removePlayerData)
+
+-- Set up periodic checks
+_c.Heartbeat:Connect(function()
+	for player, data in pairs(playerData) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local position = player.Character.HumanoidRootPart.Position
+			local velocity = player.Character.HumanoidRootPart.Velocity
+			validatePlayerMovement(player, position, velocity)
 		end
-		data.healthDropCount = 0
-		data.lastHealthDropCheck = currentTime
-	end
-
-	-- Update action history
-	while #data.actionHistory > 0 and currentTime - data.actionHistory[1] > data.actionHistorySize do
-		table.remove(data.actionHistory, 1)
-	end
-
-		-- Reset and update tracking variables
-		data.lastBehaviorCheck = currentTime
 	end
 end)
