@@ -1,245 +1,181 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local StarterGui = game:GetService("StarterGui")
-local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
 
--- Define a debounce to prevent the code from running too often
-local debounce = false
+-- Obfuscate important variable names
+local _a, _b, _c, _d = Players, ReplicatedStorage, RunService, UserInputService
 
--- Get the RemoteEvent with a timeout to prevent infinite yield
-local timeout = 5 -- seconds
-local playerMovement = ReplicatedStorage:WaitForChild("PlayerMovement", timeout)
-if not playerMovement then
-	warn("PlayerMovement not found after timeout!")
-	return
+local player = _a.LocalPlayer
+
+-- Create a secure random number generator
+local random = Random.new(tick())
+
+-- Encryption key handling
+local encryptionKeys = {}
+local function rotateEncryptionKey()
+	table.insert(encryptionKeys, 1, _b:WaitForChild("EncryptionKey").Value)
+	if #encryptionKeys > 5 then
+		table.remove(encryptionKeys)
+	end
+end
+rotateEncryptionKey()
+_c.Heartbeat:Connect(function()
+	if random:NextNumber() < 0.001 then  -- 0.1% chance each heartbeat
+		rotateEncryptionKey()
+	end
+end)
+
+local function securityWrapper(func)
+	return function(...)
+		if debug.info(2, "s") ~= script.Name then
+			player:Kick("Try Again!")
+			return
+		end
+		return func(...)
+	end
 end
 
--- Get the encryption key from the server
-local getEncryptionKey = ReplicatedStorage:WaitForChild("GetEncryptionKey", timeout)
-if not getEncryptionKey then
-	warn("GetEncryptionKey not found after timeout!")
-	return
+local function waitForRemote(name, timeout)
+	local remote = _b:FindFirstChild(name)
+	local startTime = tick()
+	while not remote do
+		if tick() - startTime > timeout then
+			error("Timeout waiting for RemoteEvent: " .. name)
+		end
+		remote = _b:FindFirstChild(name)
+		task.wait(0.1)
+	end
+	return remote
 end
 
-local encryptionKey = getEncryptionKey:InvokeServer()
+local playerMovement = waitForRemote("PlayerMovement", 10)
+local kickRemote = waitForRemote("KickRemote", 10)
 
--- Function to encrypt data using XOR (Client)
 local function encryptData(data)
-	local encrypted = {}
-	for i = 1, #data do
-		local byte = string.byte(data, i)
-		local encryptedByte = bit32.bxor(byte, encryptionKey)
-		encrypted[i] = math.floor(encryptedByte) % 256 -- Ensure valid ASCII range (0-255)
+	local key = encryptionKeys[1]
+	local dataBytes = {string.byte(data, 1, -1)}
+	local keyBytes = {string.byte(key, 1, -1)}
+	local iv = table.create(16, 0)
+	for i = 1, 16 do iv[i] = random:NextInteger(0, 255) end
+
+	local encrypted = table.create(#dataBytes, 0)
+	for i = 1, #dataBytes do
+		encrypted[i] = bit32.bxor(dataBytes[i], keyBytes[(i - 1) % #keyBytes + 1], iv[(i - 1) % 16 + 1])
 	end
-	return string.char(unpack(encrypted))
+
+	return string.char(unpack(iv)) .. string.char(unpack(encrypted))
 end
 
--- Wait for the character to load
-local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
-local humanoid = character:WaitForChild("Humanoid")
-
--- Receive corrected position from the server
-local movementCorrected = ReplicatedStorage:WaitForChild("MovementCorrected")
-
-local lastCorrectedPosition = nil -- Store the last corrected position
-
-movementCorrected.OnClientEvent:Connect(function(newPosition)
-	-- Only update position if the difference is significant
-	local currentPosition = humanoidRootPart.Position
-	if (newPosition - currentPosition).Magnitude > 5 then -- Adjust threshold as needed
-		lastCorrectedPosition = newPosition
-	end
-
-	-- Smoothly move the character towards the last corrected position
-	if lastCorrectedPosition then
-		humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(CFrame.new(lastCorrectedPosition), 0.2) -- Adjust interpolation factor as needed
-	end
-end)
-
--- Variables to track user input state
-local isJumping = false
-local isSprinting = false
-
--- Variables for more advanced checks
-local lastJumpTime = 0
-local jumpCount = 0
-local lastPosition = humanoidRootPart.Position
-local lastVelocity = Vector3.new(0, 0, 0)
-
--- Raycast parameters for ground and wall checks
-local raycastParams = RaycastParams.new()
-raycastParams.FilterDescendantsInstances = {character}
-raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-
--- Anti-cheat settings (adjust these values)
-local MAX_SPEED = 30 -- Increased threshold for speed check
-local GROUND_CHECK_DISTANCE = 5 -- Distance for ground check
-local GROUND_CHECK_THRESHOLD = 5 -- Number of consecutive "not on ground" checks before flagging
-
--- Function to perform raycast for ground check
-local function isOnGround(humanoidRootPart)
-	local raycastResult = workspace:Raycast(humanoidRootPart.Position, Vector3.new(0, -GROUND_CHECK_DISTANCE, 0), raycastParams)
-	return raycastResult ~= nil
+local function waitForCharacter()
+	return player.Character or player.CharacterAdded:Wait()
 end
 
--- Variables for ground check
-local notOnGroundCount = 0
+local character, humanoid, rootPart
 
--- Function to check for wall collisions
-local function isCollidingWithWall(humanoidRootPart)
-	local WALL_CHECK_DISTANCE = 2 -- studs for wall check
-	local directions = {
-		Vector3.new(1, 0, 0),
-		Vector3.new(-1, 0, 0),
-		Vector3.new(0, 0, 1),
-		Vector3.new(0, 0, -1)
-	}
+local function updateCharacterReferences()
+	character = waitForCharacter()
+	humanoid = character:WaitForChild("Humanoid")
+	rootPart = character:WaitForChild("HumanoidRootPart")
+end
 
-	for _, direction in ipairs(directions) do
-		local raycastResult = workspace:Raycast(humanoidRootPart.Position, direction * WALL_CHECK_DISTANCE, raycastParams)
-		if raycastResult then
-			return true
+updateCharacterReferences = securityWrapper(updateCharacterReferences)
+
+local function monitorWalkSpeed()
+	if not humanoid then return end
+
+	task.wait(1)  -- Wait for 1 second after character spawn
+	local originalWalkSpeed = humanoid.WalkSpeed
+
+	humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+		if math.abs(humanoid.WalkSpeed - originalWalkSpeed) > 0.1 then  -- Allow small tolerance
+			playerMovement:FireServer(encryptData("WalkSpeedChanged," .. tostring(humanoid.WalkSpeed)), encryptData(""))
+			player:Kick("Unexpected WalkSpeed change detected on client.")
 		end
-	end
-
-	return false
+	end)
 end
 
--- Function to send player movement data to the server
-local function sendMovementData()
-	if debounce then return end
-	debounce = true
+monitorWalkSpeed = securityWrapper(monitorWalkSpeed)
 
-	-- Get the player's position and velocity
-	local position = humanoidRootPart.Position
-	local velocity = humanoidRootPart.Velocity
+local function sendPlayerMovement()
+	if not rootPart then return end
 
-	-- More advanced checks (examples)
+	local position = rootPart.Position
+	local velocity = rootPart.Velocity
 
-	-- Jump exploit check
-	if isJumping and tick() - lastJumpTime < 0.3 then
-		jumpCount += 1
-		if jumpCount > 4 then
-			-- Player is likely exploiting jump
-			humanoidRootPart.Velocity = Vector3.new(0, 0, 0)
-			jumpCount = 0
-			warn("Jump exploit detected!")
-		end
-	else
-		jumpCount = 0
-	end
-	lastJumpTime = tick()
+	local positionString = string.format("%.2f,%.2f,%.2f", position.X, position.Y, position.Z)
+	local velocityString = string.format("%.2f,%.2f,%.2f", velocity.X, velocity.Y, velocity.Z)
 
-	-- Improved ground check
-	if not isOnGround(humanoidRootPart) and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and not isJumping then
-		notOnGroundCount += 1
-		if notOnGroundCount >= GROUND_CHECK_THRESHOLD then
-			-- Player might be flying
-			humanoid:ChangeState(Enum.HumanoidStateType.Freefall) -- Force freefall
-			warn("Fly exploit detected!")
-			notOnGroundCount = 0 -- Reset the count
-		end
-	else
-		notOnGroundCount = 0 -- Reset the count if on ground
-	end
-
-	-- NoClip check (client-side)
-	if isCollidingWithWall(humanoidRootPart) then
-		-- Player might be noclipping
-		humanoidRootPart.CFrame = CFrame.new(lastPosition) -- Reset position
-		warn("NoClip exploit detected!")
-	end
-
-	-- Convert Vector3 values to strings
-	local positionString = tostring(position.X) .. "," .. tostring(position.Y) .. "," .. tostring(position.Z)
-	local velocityString = tostring(velocity.X) .. "," .. tostring(velocity.Y) .. "," .. tostring(velocity.Z)
-
-	-- Encrypt the position and velocity strings
-	local encryptedPosition = encryptData(positionString)
-	local encryptedVelocity = encryptData(velocityString)
-
-	-- Send the encrypted data to the server
-	playerMovement:FireServer(encryptedPosition, encryptedVelocity)
-
-	-- Update last position and velocity
-	lastPosition = position
-	lastVelocity = velocity
-
-	wait(0.2) -- Increased wait time to reduce frequency
-	debounce = false
+	playerMovement:FireServer(encryptData(positionString), encryptData(velocityString))
 end
 
--- Connect to user input events
-UserInputService.JumpRequest:Connect(function()
-	isJumping = true
-	sendMovementData() -- Send data when jump is requested
+sendPlayerMovement = securityWrapper(sendPlayerMovement)
+
+kickRemote.OnClientEvent:Connect(function(message)
+	player:Kick(message)
 end)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-	if input.KeyCode == Enum.KeyCode.LeftShift then
-		isSprinting = true
-		sendMovementData() -- Send data when sprinting starts
+local function onCharacterAdded(newCharacter)
+	updateCharacterReferences()
+	monitorWalkSpeed()
+end
+
+onCharacterAdded = securityWrapper(onCharacterAdded)
+
+-- Set up input detection
+local inputBuffer = {}
+local function handleInput(input, gameProcessed)
+	if gameProcessed then return end
+
+	table.insert(inputBuffer, {input = input.KeyCode.Name, time = tick()})
+	if #inputBuffer > 20 then
+		table.remove(inputBuffer, 1)
 	end
-end)
 
-UserInputService.InputEnded:Connect(function(input, gameProcessedEvent)
-	if input.KeyCode == Enum.KeyCode.LeftShift then
-		isSprinting = false
-		sendMovementData() -- Send data when sprinting ends
+	if #inputBuffer == 20 and inputBuffer[20].time - inputBuffer[1].time < 1 then
+		playerMovement:FireServer(encryptData("RapidInputDetected"), encryptData(""))
 	end
-end)
+end
+_d.InputBegan:Connect(handleInput)
 
--- Disable CoreGui to prevent exploiters from manipulating it
-StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false)
+-- Set up anti-teleport detection
+local lastPosition = Vector3.new(0, 0, 0)
+local function checkTeleport()
+	if not rootPart then return end
 
--- Anti-speed hack (basic example)
-local lastPosition = humanoidRootPart.Position
-local lastSpeedCheck = tick()
-local speedHistory = {}
-local speedHistorySize = 5 -- Number of speed samples to keep
-
-RunService.Heartbeat:Connect(function(deltaTime)
-	local currentPosition = humanoidRootPart.Position
-
+	local currentPosition = rootPart.Position
 	local distance = (currentPosition - lastPosition).Magnitude
-	local speed = distance / deltaTime
 
-	-- Store speed in history
-	table.insert(speedHistory, speed)
-	if #speedHistory > speedHistorySize then
-		table.remove(speedHistory, 1)
-	end
-
-	-- Calculate average speed
-	local totalSpeed = 0
-	for _, s in ipairs(speedHistory) do
-		totalSpeed += s
-	end
-	local averageSpeed = totalSpeed / #speedHistory
-
-	-- Check average speed over time
-	if tick() - lastSpeedCheck >= 0.3 then
-		if averageSpeed > MAX_SPEED then
-			-- Check player state before flagging
-			if humanoid:GetState() ~= Enum.HumanoidStateType.Freefall and 
-				humanoid:GetState() ~= Enum.HumanoidStateType.Jumping and
-				not isJumping then  -- Make sure isJumping is updated correctly in your input handling
-				-- Gradually correct position
-				humanoidRootPart.CFrame = humanoidRootPart.CFrame:Lerp(CFrame.new(lastPosition), 0.2)
-				warn("Speed exploit detected!")
-			end 
-		end
-		lastSpeedCheck = tick()
+	if distance > 50 then  -- Adjust this threshold as needed
+		playerMovement:FireServer(encryptData("PossibleTeleportDetected," .. tostring(distance)), encryptData(""))
 	end
 
 	lastPosition = currentPosition
+end
+_c.Heartbeat:Connect(checkTeleport)
+
+player.CharacterAdded:Connect(onCharacterAdded)
+
+if player.Character then
+	onCharacterAdded(player.Character)
+end
+
+_c.Heartbeat:Connect(sendPlayerMovement)
+
+-- Additional security measures
+_c.Heartbeat:Connect(function()
+	if not _c:IsClient() then
+		player:Kick("Client-server mismatch detected.")
+	end
+	if not _d:IsKeyDown(Enum.KeyCode.Unknown) then
+		player:Kick("Input simulation detected.")
+	end
 end)
 
--- Movement replication loop (reduced frequency)
-while true do
-	wait(0.2) -- Increased wait time to reduce frequency
-	sendMovementData()
-end
+-- Memory usage monitoring
+local initialMemory = gcinfo()
+_c.Heartbeat:Connect(function()
+	if math.abs(gcinfo() - initialMemory) > 1000 then  -- Adjust threshold as needed
+		player:Kick("Unusual memory usage detected.")
+	end
+end)
