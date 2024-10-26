@@ -2,180 +2,389 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
--- Obfuscate important variable names
-local _a, _b, _c, _d = Players, ReplicatedStorage, RunService, UserInputService
+-- Report System Implementation
+local ReportSystem = {}
+local lastReportTime = 0
+local REPORT_COOLDOWN = 60 -- 60 seconds cooldown
 
-local player = _a.LocalPlayer
-
--- Create a secure random number generator
-local random = Random.new(tick())
-
--- Encryption key handling
-local encryptionKeys = {}
-local function rotateEncryptionKey()
-	table.insert(encryptionKeys, 1, _b:WaitForChild("EncryptionKey").Value)
-	if #encryptionKeys > 5 then
-		table.remove(encryptionKeys)
+function ReportSystem.createReportUI()
+	local currentTime = tick()
+	if currentTime - lastReportTime < REPORT_COOLDOWN then
+		-- Show a message to the player about the cooldown
+		local player = Players.LocalPlayer
+		local cooldownRemaining = math.ceil(REPORT_COOLDOWN - (currentTime - lastReportTime))
+		local message = string.format("Please wait %d seconds before reporting again.", cooldownRemaining)
+		game.StarterGui:SetCore("SendNotification", {
+			Title = "Report Cooldown",
+			Text = message,
+			Duration = 5
+		})
+		return
 	end
-end
-rotateEncryptionKey()
-_c.Heartbeat:Connect(function()
-	if random:NextNumber() < 0.001 then  -- 0.1% chance each heartbeat
-		rotateEncryptionKey()
-	end
-end)
 
-local function securityWrapper(func)
-	return function(...)
-		if debug.info(2, "s") ~= script.Name then
-			player:Kick("Try Again!")
-			return
+	lastReportTime = currentTime
+
+	local player = Players.LocalPlayer
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ReportSystem"
+
+	-- Main container
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(0, 600, 0, 400)
+	mainFrame.Position = UDim2.new(0.5, -300, 0.5, -200)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	mainFrame.BackgroundTransparency = 0.1
+	mainFrame.ClipsDescendants = true
+	mainFrame.Parent = gui
+
+	-- Apply blur effect
+	local blur = Instance.new("BlurEffect")
+	blur.Size = 0
+	blur.Parent = game.Lighting
+
+	-- Gradient background
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 60)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 35))
+	})
+	gradient.Parent = mainFrame
+
+	-- Header
+	local header = Instance.new("TextLabel")
+	header.Size = UDim2.new(1, 0, 0, 50)
+	header.BackgroundTransparency = 1
+	header.Text = "Player Report System"
+	header.TextColor3 = Color3.fromRGB(255, 255, 255)
+	header.TextSize = 24
+	header.Font = Enum.Font.GothamBold
+	header.Parent = mainFrame
+
+	-- Category selector
+	local categoryFrame = Instance.new("Frame")
+	categoryFrame.Size = UDim2.new(0, 200, 0, 300)
+	categoryFrame.Position = UDim2.new(0, 20, 0, 70)
+	categoryFrame.BackgroundTransparency = 0.9
+	categoryFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	categoryFrame.Parent = mainFrame
+
+	local categories = {
+		{name = "Exploiting", color = Color3.fromRGB(255, 100, 100)},
+		{name = "Harassment", color = Color3.fromRGB(255, 150, 100)},
+		{name = "Inappropriate Content", color = Color3.fromRGB(100, 150, 255)},
+		{name = "Scamming", color = Color3.fromRGB(255, 200, 100)},
+		{name = "Other", color = Color3.fromRGB(150, 150, 150)}
+	}
+
+	local selectedCategory = nil
+	local function createCategoryButton(category, index)
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.new(1, -10, 0, 40)
+		button.Position = UDim2.new(0, 5, 0, (index-1) * 45)
+		button.BackgroundColor3 = category.color
+		button.BackgroundTransparency = 0.8
+		button.Text = category.name
+		button.TextColor3 = Color3.fromRGB(255, 255, 255)
+		button.TextSize = 16
+		button.Font = Enum.Font.GothamSemibold
+		button.Parent = categoryFrame
+
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 8)
+		corner.Parent = button
+
+		button.MouseButton1Click:Connect(function()
+			if selectedCategory then
+				TweenService:Create(selectedCategory, TweenInfo.new(0.3), {BackgroundTransparency = 0.8}):Play()
+			end
+			selectedCategory = button
+			TweenService:Create(button, TweenInfo.new(0.3), {BackgroundTransparency = 0.5}):Play()
+		end)
+
+		return button
+	end
+
+	for i, category in ipairs(categories) do
+		createCategoryButton(category, i)
+	end
+
+	-- Evidence collector
+	local evidenceFrame = Instance.new("Frame")
+	evidenceFrame.Size = UDim2.new(0, 340, 0, 300)
+	evidenceFrame.Position = UDim2.new(1, -360, 0, 70)
+	evidenceFrame.BackgroundTransparency = 0.9
+	evidenceFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	evidenceFrame.Parent = mainFrame
+
+	local evidenceInput = Instance.new("TextBox")
+	evidenceInput.Size = UDim2.new(1, -20, 1, -60)
+	evidenceInput.Position = UDim2.new(0, 10, 0, 10)
+	evidenceInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	evidenceInput.BackgroundTransparency = 0.5
+	evidenceInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+	evidenceInput.TextXAlignment = Enum.TextXAlignment.Left
+	evidenceInput.TextYAlignment = Enum.TextYAlignment.Top
+	evidenceInput.TextWrapped = true
+	evidenceInput.ClearTextOnFocus = false
+	evidenceInput.Text = "Describe the incident here..."
+	evidenceInput.Font = Enum.Font.Gotham
+	evidenceInput.TextSize = 14
+	evidenceInput.Parent = evidenceFrame
+
+	-- Submit button
+	local submitButton = Instance.new("TextButton")
+	submitButton.Size = UDim2.new(0, 200, 0, 40)
+	submitButton.Position = UDim2.new(0.5, -100, 1, -50)
+	submitButton.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+	submitButton.Text = "Submit Report"
+	submitButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	submitButton.Font = Enum.Font.GothamBold
+	submitButton.TextSize = 16
+	submitButton.Parent = mainFrame
+
+	local submitCorner = Instance.new("UICorner")
+	submitCorner.CornerRadius = UDim.new(0, 8)
+	submitCorner.Parent = submitButton
+
+	-- Close button
+	local closeButton = Instance.new("TextButton")
+	closeButton.Size = UDim2.new(0, 30, 0, 30)
+	closeButton.Position = UDim2.new(1, -40, 0, 10)
+	closeButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+	closeButton.Text = "X"
+	closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	closeButton.Font = Enum.Font.GothamBold
+	closeButton.TextSize = 16
+	closeButton.Parent = mainFrame
+
+	local closeCorner = Instance.new("UICorner")
+	closeCorner.CornerRadius = UDim.new(0, 8)
+	closeCorner.Parent = closeButton
+
+	-- Event handling
+	submitButton.MouseButton1Click:Connect(function()
+		if selectedCategory and evidenceInput.Text ~= "Describe the incident here..." then
+			ReplicatedStorage.ReportEvent:FireServer({
+				category = selectedCategory.Text,
+				evidence = evidenceInput.Text,
+				timestamp = os.time()
+			})
+			gui:Destroy()
+			blur:Destroy()
 		end
-		return func(...)
-	end
+	end)
+
+	closeButton.MouseButton1Click:Connect(function()
+		gui:Destroy()
+		blur:Destroy()
+	end)
+
+	-- Animations
+	TweenService:Create(blur, TweenInfo.new(0.5), {Size = 20}):Play()
+	mainFrame.Position = UDim2.new(0.5, -300, 1.5, 0)
+	TweenService:Create(mainFrame, TweenInfo.new(0.7, Enum.EasingStyle.Back), {
+		Position = UDim2.new(0.5, -300, 0.5, -200)
+	}):Play()
+
+	gui.Parent = player.PlayerGui
+	return gui
 end
 
-local function waitForRemote(name, timeout)
-	local remote = _b:FindFirstChild(name)
-	local startTime = tick()
-	while not remote do
-		if tick() - startTime > timeout then
-			error("Timeout waiting for RemoteEvent: " .. name)
+function ReportSystem.init()
+	local reportButton = Instance.new("TextButton")
+	reportButton.Size = UDim2.new(0, 100, 0, 30)
+	reportButton.Position = UDim2.new(1, -110, 0, 10)
+	reportButton.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+	reportButton.Text = "Report Player"
+	reportButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	reportButton.Font = Enum.Font.GothamBold
+	reportButton.TextSize = 14
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = reportButton
+
+	reportButton.MouseButton1Click:Connect(function()
+		ReportSystem.createReportUI()
+	end)
+
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "ReportButton"
+	reportButton.Parent = gui
+	gui.Parent = Players.LocalPlayer.PlayerGui
+end
+
+-- Initialize ReportSystem immediately
+ReportSystem.init()
+
+-- Make ReportSystem accessible globally
+_G.ReportSystem = ReportSystem
+
+-- Core state management
+local State = {
+	player = Players.LocalPlayer,
+	encryptionKeys = {},
+	inputBuffer = {},
+	lastPosition = Vector3.new(0, 0, 0),
+	characterRefs = {
+		character = nil,
+		humanoid = nil,
+		rootPart = nil
+	}
+}
+
+-- Security utilities
+local SecurityUtils = {
+	random = Random.new(tick()),
+
+	encryptData = function(self, data)
+		local key = State.encryptionKeys[1]
+		local dataBytes = {string.byte(data, 1, -1)}
+		local keyBytes = {string.byte(key, 1, -1)}
+		local iv = table.create(16, 0)
+
+		for i = 1, 16 do 
+			iv[i] = self.random:NextInteger(0, 255)
 		end
-		remote = _b:FindFirstChild(name)
-		task.wait(0.1)
+
+		local encrypted = table.create(#dataBytes, 0)
+		for i = 1, #dataBytes do
+			encrypted[i] = bit32.bxor(dataBytes[i], keyBytes[(i - 1) % #keyBytes + 1], iv[(i - 1) % 16 + 1])
+		end
+
+		return string.char(unpack(iv)) .. string.char(unpack(encrypted))
+	end,
+
+	rotateEncryptionKey = function(self)
+		local key = ReplicatedStorage:WaitForChild("EncryptionKey").Value
+		table.insert(State.encryptionKeys, 1, key)
+		if #State.encryptionKeys > 5 then
+			table.remove(State.encryptionKeys)
+		end
+		return true
 	end
-	return remote
-end
+}
 
-local playerMovement = waitForRemote("PlayerMovement", 10)
-local kickRemote = waitForRemote("KickRemote", 10)
+-- Character management
+local CharacterManager = {
+	updateReferences = function(self)
+		local char = State.player.Character or State.player.CharacterAdded:Wait()
+		State.characterRefs.character = char
+		State.characterRefs.humanoid = char:WaitForChild("Humanoid")
+		State.characterRefs.rootPart = char:WaitForChild("HumanoidRootPart")
+		return true
+	end,
 
-local function encryptData(data)
-	local key = encryptionKeys[1]
-	local dataBytes = {string.byte(data, 1, -1)}
-	local keyBytes = {string.byte(key, 1, -1)}
-	local iv = table.create(16, 0)
-	for i = 1, 16 do iv[i] = random:NextInteger(0, 255) end
+	monitorWalkSpeed = function(self)
+		local humanoid = State.characterRefs.humanoid
+		if not humanoid then return false end
 
-	local encrypted = table.create(#dataBytes, 0)
-	for i = 1, #dataBytes do
-		encrypted[i] = bit32.bxor(dataBytes[i], keyBytes[(i - 1) % #keyBytes + 1], iv[(i - 1) % 16 + 1])
+		task.wait(1)
+		local originalWalkSpeed = humanoid.WalkSpeed
+
+		RunService.Heartbeat:Connect(function()
+			if not humanoid then return end
+
+			local currentWalkSpeed = humanoid.WalkSpeed
+			if math.abs(currentWalkSpeed - originalWalkSpeed) > 0.1 then
+				State.player:Kick("WalkSpeed modification detected")
+			end
+		end)
+		return true
+	end
+}
+
+-- Remote event management
+local RemoteManager = {
+	movement = nil,
+	kick = nil,
+
+	init = function(self)
+		self.movement = ReplicatedStorage:WaitForChild("PlayerMovement", 10)
+		self.kick = ReplicatedStorage:WaitForChild("KickRemote", 10)
+
+		if not (self.movement and self.kick) then
+			return false
+		end
+
+		self.kick.OnClientEvent:Connect(function(message)
+			State.player:Kick(message)
+		end)
+
+		return true
+	end,
+
+	sendMovementUpdate = function(self)
+		if not (self.movement and State.characterRefs.rootPart) then return end
+
+		local position = State.characterRefs.rootPart.Position
+		local velocity = State.characterRefs.rootPart.Velocity
+
+		local posStr = string.format("%.2f,%.2f,%.2f", position.X, position.Y, position.Z)
+		local velStr = string.format("%.2f,%.2f,%.2f", velocity.X, velocity.Y, velocity.Z)
+
+		self.movement:FireServer(
+			SecurityUtils:encryptData(posStr),
+			SecurityUtils:encryptData(velStr)
+		)
+	end
+}
+
+-- Input monitoring
+local InputMonitor = {
+	handleInput = function(input, gameProcessed)
+		if gameProcessed then return end
+
+		table.insert(State.inputBuffer, {input = input.KeyCode.Name, time = tick()})
+		if #State.inputBuffer > 20 then
+			table.remove(State.inputBuffer, 1)
+		end
+
+		if #State.inputBuffer == 20 and State.inputBuffer[20].time - State.inputBuffer[1].time < 1 then
+			if RemoteManager.movement then
+				RemoteManager.movement:FireServer(
+					SecurityUtils:encryptData("RapidInputDetected"),
+					SecurityUtils:encryptData("")
+				)
+			end
+		end
+	end
+}
+
+-- Initialize the system
+local function init()
+	if not SecurityUtils:rotateEncryptionKey() then return end
+	if not RemoteManager:init() then return end
+
+	-- Set up character handling
+	State.player.CharacterAdded:Connect(function()
+		if CharacterManager:updateReferences() then
+			CharacterManager:monitorWalkSpeed()
+		end
+	end)
+
+	if State.player.Character then
+		if CharacterManager:updateReferences() then
+			CharacterManager:monitorWalkSpeed()
+		end
 	end
 
-	return string.char(unpack(iv)) .. string.char(unpack(encrypted))
-end
+	-- Set up input detection
+	UserInputService.InputBegan:Connect(InputMonitor.handleInput)
 
-local function waitForCharacter()
-	return player.Character or player.CharacterAdded:Wait()
-end
+	-- Set up heartbeat updates
+	RunService.Heartbeat:Connect(function()
+		RemoteManager:sendMovementUpdate()
+	end)
 
-local character, humanoid, rootPart
-
-local function updateCharacterReferences()
-	character = waitForCharacter()
-	humanoid = character:WaitForChild("Humanoid")
-	rootPart = character:WaitForChild("HumanoidRootPart")
-end
-
-updateCharacterReferences = securityWrapper(updateCharacterReferences)
-
-local function monitorWalkSpeed()
-	if not humanoid then return end
-
-	task.wait(1)  -- Wait for 1 second after character spawn
-	local originalWalkSpeed = humanoid.WalkSpeed
-
-	humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-		if math.abs(humanoid.WalkSpeed - originalWalkSpeed) > 0.1 then  -- Allow small tolerance
-			playerMovement:FireServer(encryptData("WalkSpeedChanged," .. tostring(humanoid.WalkSpeed)), encryptData(""))
-			player:Kick("Unexpected WalkSpeed change detected on client.")
+	-- Set up encryption key rotation
+	RunService.Heartbeat:Connect(function()
+		if SecurityUtils.random:NextNumber() < 0.001 then
+			SecurityUtils:rotateEncryptionKey()
 		end
 	end)
 end
 
-monitorWalkSpeed = securityWrapper(monitorWalkSpeed)
-
-local function sendPlayerMovement()
-	if not rootPart then return end
-
-	local position = rootPart.Position
-	local velocity = rootPart.Velocity
-
-	local positionString = string.format("%.2f,%.2f,%.2f", position.X, position.Y, position.Z)
-	local velocityString = string.format("%.2f,%.2f,%.2f", velocity.X, velocity.Y, velocity.Z)
-
-	playerMovement:FireServer(encryptData(positionString), encryptData(velocityString))
-end
-
-sendPlayerMovement = securityWrapper(sendPlayerMovement)
-
-kickRemote.OnClientEvent:Connect(function(message)
-	player:Kick(message)
-end)
-
-local function onCharacterAdded(newCharacter)
-	updateCharacterReferences()
-	monitorWalkSpeed()
-end
-
-onCharacterAdded = securityWrapper(onCharacterAdded)
-
--- Set up input detection
-local inputBuffer = {}
-local function handleInput(input, gameProcessed)
-	if gameProcessed then return end
-
-	table.insert(inputBuffer, {input = input.KeyCode.Name, time = tick()})
-	if #inputBuffer > 20 then
-		table.remove(inputBuffer, 1)
-	end
-
-	if #inputBuffer == 20 and inputBuffer[20].time - inputBuffer[1].time < 1 then
-		playerMovement:FireServer(encryptData("RapidInputDetected"), encryptData(""))
-	end
-end
-_d.InputBegan:Connect(handleInput)
-
--- Set up anti-teleport detection
-local lastPosition = Vector3.new(0, 0, 0)
-local function checkTeleport()
-	if not rootPart then return end
-
-	local currentPosition = rootPart.Position
-	local distance = (currentPosition - lastPosition).Magnitude
-
-	if distance > 50 then  -- Adjust this threshold as needed
-		playerMovement:FireServer(encryptData("PossibleTeleportDetected," .. tostring(distance)), encryptData(""))
-	end
-
-	lastPosition = currentPosition
-end
-_c.Heartbeat:Connect(checkTeleport)
-
-player.CharacterAdded:Connect(onCharacterAdded)
-
-if player.Character then
-	onCharacterAdded(player.Character)
-end
-
-_c.Heartbeat:Connect(sendPlayerMovement)
-
--- Additional security measures
-_c.Heartbeat:Connect(function()
-	if not _c:IsClient() then
-		player:Kick("Client-server mismatch detected.")
-	end
-	if not _d:IsKeyDown(Enum.KeyCode.Unknown) then
-		player:Kick("Input simulation detected.")
-	end
-end)
-
--- Memory usage monitoring
-local initialMemory = gcinfo()
-_c.Heartbeat:Connect(function()
-	if math.abs(gcinfo() - initialMemory) > 1000 then  -- Adjust threshold as needed
-		player:Kick("Unusual memory usage detected.")
-	end
-end)
+init()
