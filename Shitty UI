@@ -1,1 +1,468 @@
+-- SERVICES
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
 
+-- SINGLE THEME (using Dark theme settings)
+local currentTheme = {
+    MainColor = Color3.fromRGB(35, 35, 35),
+    AccentColor = Color3.fromRGB(0, 170, 255),
+    SecondaryColor = Color3.fromRGB(50, 50, 50),
+    TextColor = Color3.fromRGB(255, 255, 255),
+    ShadowColor = Color3.fromRGB(0, 0, 0),
+    ShadowTransparency = 0.7
+}
+
+-- Default keybind stored as a table (supports Keyboard or Mouse)
+local toggleKey = { Type = "Keyboard", Code = Enum.KeyCode.F9 }
+
+local isDraggingSlider = false
+
+-- Utility function for tweens
+local function animate(instance, properties, duration, easingStyle, easingDirection)
+    easingStyle = easingStyle or Enum.EasingStyle.Quad
+    easingDirection = easingDirection or Enum.EasingDirection.Out
+    local tweenInfo = TweenInfo.new(duration, easingStyle, easingDirection)
+    local tween = TweenService:Create(instance, tweenInfo, properties)
+    tween:Play()
+    return tween
+end
+
+--------------------------------------------------
+-- UIComponents Module (Reusable Elements)
+--------------------------------------------------
+local UIComponents = {}
+
+function UIComponents:createButton(text, size, position, parent, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = position
+    btn.BackgroundColor3 = currentTheme.SecondaryColor
+    btn.Text = text
+    btn.TextColor3 = currentTheme.TextColor
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 18
+    btn.AutoButtonColor = false
+    btn.Parent = parent
+
+    local corner = Instance.new("UICorner", btn)
+    corner.CornerRadius = UDim.new(0, 6)
+
+    btn.MouseEnter:Connect(function()
+        animate(btn, {BackgroundColor3 = currentTheme.AccentColor}, 0.2)
+    end)
+    btn.MouseLeave:Connect(function()
+        animate(btn, {BackgroundColor3 = currentTheme.SecondaryColor}, 0.2)
+    end)
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+    return btn
+end
+
+function UIComponents:createToggle(size, position, parent, initialState, callback)
+    local toggle = Instance.new("Frame")
+    toggle.Size = size
+    toggle.Position = position
+    toggle.BackgroundColor3 = initialState and currentTheme.AccentColor or currentTheme.SecondaryColor
+    toggle.Parent = parent
+    local corner = Instance.new("UICorner", toggle)
+    corner.CornerRadius = UDim.new(0, size.Y.Offset / 2)
+
+    local knobSize = size.Y.Offset - 4
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, knobSize, 0, knobSize)
+    knob.Position = initialState and UDim2.new(1, -knobSize - 2, 0, 2) or UDim2.new(0, 2, 0, 2)
+    knob.BackgroundColor3 = currentTheme.MainColor
+    knob.Parent = toggle
+    local knobCorner = Instance.new("UICorner", knob)
+    knobCorner.CornerRadius = UDim.new(0, knobSize / 2)
+
+    local state = initialState or false
+    toggle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            state = not state
+            if state then
+                animate(knob, {Position = UDim2.new(1, -knobSize - 2, 0, 2)}, 0.2)
+                toggle.BackgroundColor3 = currentTheme.AccentColor
+            else
+                animate(knob, {Position = UDim2.new(0, 2, 0, 2)}, 0.2)
+                toggle.BackgroundColor3 = currentTheme.SecondaryColor
+            end
+            if callback then callback(state) end
+        end
+    end)
+    return toggle
+end
+
+function UIComponents:createSlider(size, position, parent, initialValue, callback)
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = size
+    sliderFrame.Position = position
+    sliderFrame.BackgroundColor3 = currentTheme.SecondaryColor
+    sliderFrame.Parent = parent
+
+    local sliderKnob = Instance.new("Frame")
+    sliderKnob.Size = UDim2.new(0, 20, 0, 20)
+    sliderKnob.Position = UDim2.new(initialValue or 0.5, -10, 0, -5)
+    sliderKnob.BackgroundColor3 = currentTheme.AccentColor
+    sliderKnob.Parent = sliderFrame
+    local knobCorner = Instance.new("UICorner", sliderKnob)
+    knobCorner.CornerRadius = UDim.new(0, 10)
+
+    local sliderValue = Instance.new("TextLabel")
+    sliderValue.Size = UDim2.new(0, 50, 0, 20)
+    sliderValue.Position = UDim2.new(1, 10, 0, -5)
+    sliderValue.Text = tostring(math.floor((initialValue or 0.5)*100)) .. "%"
+    sliderValue.TextColor3 = currentTheme.TextColor
+    sliderValue.BackgroundTransparency = 1
+    sliderValue.Font = Enum.Font.GothamBold
+    sliderValue.TextSize = 16
+    sliderValue.Parent = sliderFrame
+
+    local dragging = false
+    sliderKnob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            isDraggingSlider = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+            isDraggingSlider = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local relPos = math.clamp((input.Position.X - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
+            animate(sliderKnob, {Position = UDim2.new(relPos, -10, 0, -5)}, 0.1)
+            sliderValue.Text = tostring(math.floor(relPos * 100)) .. "%"
+            if callback then callback(relPos) end
+        end
+    end)
+    return sliderFrame, sliderKnob, sliderValue
+end
+
+function UIComponents:createDropdown(size, position, parent, options, callback)
+    local dropdown = Instance.new("TextButton")
+    dropdown.Size = size
+    dropdown.Position = position
+    dropdown.BackgroundColor3 = currentTheme.SecondaryColor
+    dropdown.Text = "Select..."
+    dropdown.TextColor3 = currentTheme.TextColor
+    dropdown.Font = Enum.Font.GothamBold
+    dropdown.TextSize = 16
+    dropdown.AutoButtonColor = false
+    dropdown.Parent = parent
+    local corner = Instance.new("UICorner", dropdown)
+    corner.CornerRadius = UDim.new(0, 6)
+
+    local dropFrame = Instance.new("Frame")
+    dropFrame.Size = UDim2.new(size.X.Scale, size.X.Offset, 0, 0)
+    dropFrame.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + size.Y.Offset)
+    dropFrame.BackgroundColor3 = currentTheme.MainColor
+    dropFrame.ClipsDescendants = true
+    dropFrame.Parent = parent
+    local dropCorner = Instance.new("UICorner", dropFrame)
+    dropCorner.CornerRadius = UDim.new(0, 6)
+
+    for i, opt in ipairs(options) do
+        local optButton = Instance.new("TextButton")
+        optButton.Size = UDim2.new(1, 0, 0, 30)
+        optButton.Position = UDim2.new(0, 0, 0, (i - 1) * 30)
+        optButton.Text = opt
+        optButton.BackgroundColor3 = currentTheme.SecondaryColor
+        optButton.TextColor3 = currentTheme.TextColor
+        optButton.Font = Enum.Font.GothamBold
+        optButton.TextSize = 16
+        optButton.AutoButtonColor = false
+        optButton.Parent = dropFrame
+        optButton.MouseButton1Click:Connect(function()
+            dropdown.Text = opt
+            animate(dropFrame, {Size = UDim2.new(size.X.Scale, size.X.Offset, 0, 0)}, 0.3)
+            if callback then callback(opt) end
+        end)
+    end
+
+    local dropdownOpen = false
+    dropdown.MouseButton1Click:Connect(function()
+        dropdownOpen = not dropdownOpen
+        if dropdownOpen then
+            animate(dropFrame, {Size = UDim2.new(size.X.Scale, size.X.Offset, 0, #options * 30)}, 0.3)
+        else
+            animate(dropFrame, {Size = UDim2.new(size.X.Scale, size.X.Offset, 0, 0)}, 0.3)
+        end
+    end)
+    return dropdown, dropFrame
+end
+
+-- Advanced animated tooltip
+local tooltipFrame
+function UIComponents:showTooltip(target, text)
+    if tooltipFrame then tooltipFrame:Destroy() end
+    tooltipFrame = Instance.new("TextLabel")
+    tooltipFrame.Text = text
+    tooltipFrame.TextSize = 14
+    tooltipFrame.Font = Enum.Font.GothamBold
+    tooltipFrame.TextColor3 = currentTheme.TextColor
+    tooltipFrame.BackgroundColor3 = currentTheme.SecondaryColor
+    tooltipFrame.BackgroundTransparency = 0.5
+    tooltipFrame.BorderSizePixel = 0
+    tooltipFrame.Parent = target.Parent
+    tooltipFrame.Size = UDim2.new(0, 150, 0, 30)
+    tooltipFrame.Position = UDim2.new(0, target.AbsolutePosition.X + target.AbsoluteSize.X + 5, 0, target.AbsolutePosition.Y)
+    tooltipFrame.Visible = false
+    wait(0.1)
+    tooltipFrame.Visible = true
+    animate(tooltipFrame, {TextTransparency = 0}, 0.2)
+end
+function UIComponents:hideTooltip()
+    if tooltipFrame then
+        animate(tooltipFrame, {TextTransparency = 1}, 0.2)
+        wait(0.2)
+        tooltipFrame:Destroy()
+        tooltipFrame = nil
+    end
+end
+
+--------------------------------------------------
+-- Function to update UI appearance when needed
+--------------------------------------------------
+local function updateUIAppearance()
+    mainWindow.BackgroundColor3 = currentTheme.MainColor
+    header.BackgroundColor3 = currentTheme.SecondaryColor
+    sidebar.BackgroundColor3 = currentTheme.SecondaryColor
+    contentArea.BackgroundColor3 = currentTheme.MainColor
+    title.TextColor3 = currentTheme.TextColor
+    mainWindowShadow.Color = currentTheme.ShadowColor
+    mainWindowShadow.Transparency = currentTheme.ShadowTransparency
+    -- You can add more updates for other UI elements here.
+end
+
+--------------------------------------------------
+-- ADVANCED MAIN UI DESIGN (Resizable & Responsive)
+--------------------------------------------------
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AdvancedUI"
+screenGui.Parent = player:WaitForChild("PlayerGui")
+screenGui.IgnoreGuiInset = true
+screenGui.ResetOnSpawn = false
+
+-- Main window frame (responsive: using scale-based sizing)
+local mainWindow = Instance.new("Frame")
+mainWindow.Size = UDim2.new(0.7, 0, 0.8, 0)
+mainWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+mainWindow.BackgroundColor3 = currentTheme.MainColor
+mainWindow.BorderSizePixel = 0
+mainWindow.Parent = screenGui
+
+local mainWindowCorner = Instance.new("UICorner", mainWindow)
+mainWindowCorner.CornerRadius = UDim.new(0, 12)
+local mainWindowShadow = Instance.new("UIStroke", mainWindow)
+mainWindowShadow.Color = currentTheme.ShadowColor
+mainWindowShadow.Thickness = 4
+mainWindowShadow.Transparency = currentTheme.ShadowTransparency
+
+-- UIAspectRatioConstraint for responsive proportions
+local aspectConstraint = Instance.new("UIAspectRatioConstraint", mainWindow)
+aspectConstraint.AspectRatio = 800 / 600
+
+-- Left Sidebar (Navigation)
+local sidebar = Instance.new("Frame")
+sidebar.Size = UDim2.new(0, 160, 1, 0)
+sidebar.Position = UDim2.new(0, 0, 0, 0)
+sidebar.BackgroundColor3 = currentTheme.SecondaryColor
+sidebar.Parent = mainWindow
+local sidebarCorner = Instance.new("UICorner", sidebar)
+sidebarCorner.CornerRadius = UDim.new(0, 12)
+
+-- Top Header (Title and Close Button)
+local header = Instance.new("Frame")
+header.Size = UDim2.new(1, -160, 0, 50)
+header.Position = UDim2.new(0, 160, 0, 0)
+header.BackgroundColor3 = currentTheme.SecondaryColor
+header.Parent = mainWindow
+local headerCorner = Instance.new("UICorner", header)
+headerCorner.CornerRadius = UDim.new(0, 12)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(0.6, 0, 1, 0)
+title.Position = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Advanced UI"
+title.TextColor3 = currentTheme.TextColor
+title.Font = Enum.Font.GothamBold
+title.TextSize = 26
+title.Parent = header
+
+local closeButton = UIComponents:createButton("X", UDim2.new(0, 40, 0, 40), UDim2.new(1, -50, 0, 5), header, function()
+    mainWindow:Destroy()
+end)
+
+-- Main Content Area
+local contentArea = Instance.new("Frame")
+contentArea.Size = UDim2.new(1, -160, 1, -50)
+contentArea.Position = UDim2.new(0, 160, 0, 50)
+contentArea.BackgroundColor3 = currentTheme.MainColor
+contentArea.ClipsDescendants = true
+contentArea.Parent = mainWindow
+
+-- Tab Navigation (in Sidebar)
+local tabNames = {"Main", "Settings", "Extras"}
+local tabButtons = {}
+local tabs = {}
+for i, name in ipairs(tabNames) do
+    local btn = UIComponents:createButton(name, UDim2.new(1, -20, 0, 50), UDim2.new(0, 10, 0, 10 + (i - 1) * 60), sidebar, function()
+        for j, t in ipairs(tabs) do
+            if j == i then
+                t.Visible = true
+                t.Position = UDim2.new(1, 0, 0, 0)
+                animate(t, {Position = UDim2.new(0, 0, 0, 0)}, 0.3)
+            else
+                if t.Visible then
+                    local tween = animate(t, {Position = UDim2.new(-1, 0, 0, 0)}, 0.3)
+                    tween.Completed:Connect(function(status)
+                        if status == Enum.PlaybackState.Completed then
+                            t.Visible = false
+                        end
+                    end)
+                end
+            end
+        end
+    end)
+    table.insert(tabButtons, btn)
+
+    local tabContent = Instance.new("Frame")
+    tabContent.Size = contentArea.Size
+    tabContent.Position = UDim2.new(1, 0, 0, 0)
+    tabContent.BackgroundTransparency = 1
+    tabContent.Visible = false
+    tabContent.Parent = contentArea
+    tabContent.Name = name
+    table.insert(tabs, tabContent)
+end
+-- Show first tab by default
+tabs[1].Visible = true
+tabs[1].Position = UDim2.new(0, 0, 0, 0)
+
+-- Function to populate tabs with sample content and extra settings in "Settings" tab
+local function populateTab(tab)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -20, 0, 40)
+    label.Position = UDim2.new(0, 10, 0, 10)
+    label.BackgroundTransparency = 1
+    label.Text = "Content for " .. tab.Name .. " tab"
+    label.TextColor3 = currentTheme.TextColor
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 24
+    label.Parent = tab
+
+    -- Example slider in each tab
+    UIComponents:createSlider(UDim2.new(0, 200, 0, 10), UDim2.new(0, 10, 0, 60), tab, 0.5, function(val)
+        print("Slider in " .. tab.Name .. ": " .. tostring(val))
+    end)
+
+    -- In the "Settings" tab, add a keybind button to change the UI toggle key.
+    if tab.Name == "Settings" then
+        local keybindButton
+        keybindButton = UIComponents:createButton("UI Toggle Key: " .. toggleKey.Code.Name, UDim2.new(0, 200, 0, 40), UDim2.new(0, 10, 0, 120), tab, function()
+            keybindButton.Text = "Press a key/mouse..."
+            local connection
+            connection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if not gameProcessed then
+                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                        toggleKey = { Type = "Keyboard", Code = input.KeyCode }
+                    else
+                        toggleKey = { Type = "Mouse", Code = input.UserInputType }
+                    end
+                    keybindButton.Text = "UI Toggle Key: " .. toggleKey.Code.Name
+                    connection:Disconnect()
+                end
+            end)
+        end)
+    end
+end
+
+for _, tab in ipairs(tabs) do
+    populateTab(tab)
+end
+
+-- Draggable Main Window (ignore input if slider is active)
+local dragging = false
+local dragInput, dragStart, startPos
+mainWindow.InputBegan:Connect(function(input)
+    if isDraggingSlider then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainWindow.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+mainWindow.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        mainWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                                         startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- RESIZABLE FEATURE: Add a resize handle at the bottom-right corner
+local resizing = false
+local resizeStart, startSize
+local resizeHandle = Instance.new("Frame")
+resizeHandle.Size = UDim2.new(0, 20, 0, 20)
+resizeHandle.AnchorPoint = Vector2.new(1, 1)
+resizeHandle.Position = UDim2.new(1, -5, 1, -5)
+resizeHandle.BackgroundColor3 = currentTheme.AccentColor
+resizeHandle.BorderSizePixel = 0
+resizeHandle.Parent = mainWindow
+local resizeCorner = Instance.new("UICorner", resizeHandle)
+resizeCorner.CornerRadius = UDim.new(0, 4)
+
+resizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        resizing = true
+        resizeStart = input.Position
+        startSize = mainWindow.AbsoluteSize
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                resizing = false
+            end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if resizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - resizeStart
+        local newWidth = math.max(startSize.X + delta.X, 300)   -- minimum width
+        local newHeight = math.max(startSize.Y + delta.Y, 200)  -- minimum height
+        mainWindow.Size = UDim2.new(0, newWidth, 0, newHeight)
+    end
+end)
+
+-- Global keybind to toggle the UI visibility (accepts both keyboard and mouse inputs)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if toggleKey.Type == "Keyboard" then
+        if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == toggleKey.Code then
+            mainWindow.Visible = not mainWindow.Visible
+        end
+    elseif toggleKey.Type == "Mouse" then
+        if input.UserInputType == toggleKey.Code then
+            mainWindow.Visible = not mainWindow.Visible
+        end
+    end
+end)
